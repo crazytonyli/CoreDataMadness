@@ -76,20 +76,30 @@ struct PersistenceController {
         })
         container.viewContext.automaticallyMergesChangesFromParent = true
 
+        print("Total user: \((try? container.viewContext.count(for: User.fetchRequest())) ?? 0)")
+
         let service = UserService(container: container)
         testDelete(service)
     }
 
     func testDelete(_ service: UserService) {
         let userID = service.createUser(name: "Foo")
+        print("Total user: \((try? container.viewContext.count(for: User.fetchRequest())) ?? 0)")
+
+        let theNewUser = User.fetchRequest()
+        theNewUser.predicate = NSPredicate(format: "SELF = %@", userID)
+        assert((try? container.viewContext.fetch(theNewUser).count) == 1)
+
         let userInViewContext = try! container.viewContext.existingObject(with: userID) as! User
         assert(userInViewContext.name == "Foo")
 
         service.deleteUser(id: userID)
 
         let performCheck: (String) -> Void = { label in
+            print("[\(#function)] CHECK \(label): hasChanges? \(container.viewContext.hasChanges ? "✅" : "❌")")
             print("[\(#function)] CHECK \(label): isDeleted == true? \(userInViewContext.isDeleted ? "✅" : "❌")")
             print("[\(#function)] CHECK \(label): existingObject(with: userID) == nil? \((try? container.viewContext.existingObject(with: userID)) == nil ? "✅" : "❌")")
+            print("[\(#function)] CHECK \(label): was the user really deleted? \((try? container.viewContext.fetch(theNewUser).count) == 0 ? "✅" : "❌")")
             print("")
         }
 
