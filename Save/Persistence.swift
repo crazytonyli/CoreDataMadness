@@ -76,6 +76,10 @@ struct PersistenceController {
         })
         container.viewContext.automaticallyMergesChangesFromParent = true
 
+        NotificationCenter.default.addObserver(forName: .NSManagedObjectContextObjectsDidChange, object: container.viewContext, queue: .main) { notification in
+            print("viewContext has changed: \(notification)")
+        }
+
         print("Total user: \((try? container.viewContext.count(for: User.fetchRequest())) ?? 0)")
 
         let service = UserService(container: container)
@@ -132,6 +136,14 @@ struct PersistenceController {
             print("And, let's `refreshAllObjects` again")
             container.viewContext.refreshAllObjects()
             performCheck("4")
+        }
+
+        // ❓ CHECK 5
+        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(4)) {
+            print("Another second later in the main thread")
+            print("And, save the view context")
+            try! container.viewContext.save()
+            performCheck("5")
         }
     }
 }
