@@ -166,12 +166,18 @@ struct PersistenceController {
             print("Save the child background context \(childBackgroundContext)")
             try! childBackgroundContext.save()
 
-            container.viewContext.perform {
-                let foundTheNewUser = try! container.viewContext.fetch(User.fetchRequest()).contains {
-                    $0.name == newUser.name
+            let performCheck: (String, NSManagedObjectContext) -> Void = { (name, context) in
+                context.perform {
+                    let foundTheNewUser = try! context.fetch(User.fetchRequest()).contains {
+                        $0.name == newUser.name
+                    }
+                    print("Found the new user in \(name)? \(foundTheNewUser ? "✅" : "❌")")
                 }
-                print("Found the user added from child background context? \(foundTheNewUser ? "✅" : "❌")")
             }
+            performCheck("the background context", backgroundContext)
+            performCheck("the child background context", childBackgroundContext)
+            performCheck("the view context", container.viewContext)
+            performCheck("a new background context", container.newBackgroundContext())
         }
     }
 }
