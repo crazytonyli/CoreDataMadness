@@ -83,7 +83,8 @@ struct PersistenceController {
         print("Total user: \((try? container.viewContext.count(for: User.fetchRequest())) ?? 0)")
 
         let service = UserService(container: container)
-        testDelete(service)
+//        testDelete(service)
+        testChildContext()
     }
 
     func testDelete(_ service: UserService) {
@@ -144,6 +145,33 @@ struct PersistenceController {
             print("And, save the view context")
             try! container.viewContext.save()
             performCheck("5")
+        }
+    }
+
+    func testChildContext() {
+        NotificationCenter.default.addObserver(forName: .NSManagedObjectContextDidSave, object: nil, queue: .main) { notification in
+            print("[\(#function)] received didSave notification: \(notification)")
+            container.viewContext.mergeChanges(fromContextDidSave: notification)
+        }
+
+        let backgroundContext = container.newBackgroundContext()
+
+        let childBackgroundContext = NSManagedObjectContext(concurrencyType: .privateQueueConcurrencyType)
+        childBackgroundContext.parent = backgroundContext
+
+        childBackgroundContext.performAndWait {
+            let newUser = User(context: childBackgroundContext)
+            newUser.name = "child background context"
+
+            print("Save the child background context \(childBackgroundContext)")
+            try! childBackgroundContext.save()
+
+            container.viewContext.perform {
+                let foundTheNewUser = try! container.viewContext.fetch(User.fetchRequest()).contains {
+                    $0.name == newUser.name
+                }
+                print("Found the user added from child background context? \(foundTheNewUser ? "✅" : "❌")")
+            }
         }
     }
 }
