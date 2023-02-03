@@ -63,6 +63,21 @@ class UserService {
         }
         return passthrough.eraseToAnyPublisher()
     }
+
+    func createOrUpdate2(name: String) -> AnyPublisher<Void, Never> {
+        let passthrough = PassthroughSubject<Void, Never>()
+        container.performBackgroundTask { context in
+            let request = User.fetchRequest()
+            request.predicate = NSPredicate(format: "name = %@", name)
+            if (try? context.fetch(request))?.first == nil {
+                let user = User(context: context)
+                user.name = name
+            }
+            try! context.save()
+            passthrough.send(completion: .finished)
+        }
+        return passthrough.eraseToAnyPublisher()
+    }
 }
 
 var cancellables: Set<AnyCancellable> = []
@@ -216,7 +231,7 @@ struct PersistenceController {
         try! container.viewContext.save()
 
         let subjects = (1...iterations).map { _ in
-            service.createOrUpdate(name: name)
+            service.createOrUpdate2(name: name)
         }
         print("createOrUpdate is called \(iterations) times")
 
