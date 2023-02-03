@@ -6,6 +6,7 @@
 //
 
 import CoreData
+import Combine
 
 class UserService {
     private let container: NSPersistentContainer
@@ -46,7 +47,25 @@ class UserService {
             try! context.save()
         }
     }
+
+    func createOrUpdate(name: String) -> AnyPublisher<Void, Never> {
+        let passthrough = PassthroughSubject<Void, Never>()
+        let context = container.newBackgroundContext()
+        context.perform {
+            let request = User.fetchRequest()
+            request.predicate = NSPredicate(format: "name = %@", name)
+            if (try? context.fetch(request))?.first == nil {
+                let user = User(context: context)
+                user.name = name
+            }
+            try! context.save()
+            passthrough.send(completion: .finished)
+        }
+        return passthrough.eraseToAnyPublisher()
+    }
 }
+
+var cancellables: Set<AnyCancellable> = []
 
 struct PersistenceController {
     static let shared = PersistenceController()
@@ -76,18 +95,19 @@ struct PersistenceController {
         })
         container.viewContext.automaticallyMergesChangesFromParent = true
 
-        NotificationCenter.default.addObserver(forName: .NSManagedObjectContextObjectsDidChange, object: container.viewContext, queue: .main) { notification in
-            print("viewContext has changed: \(notification)")
-        }
-
         print("Total user: \((try? container.viewContext.count(for: User.fetchRequest())) ?? 0)")
 
         let service = UserService(container: container)
 //        testDelete(service)
-        testChildContext()
+//        testChildContext()
+        testConcurrency(service)
     }
 
     func testDelete(_ service: UserService) {
+        NotificationCenter.default.addObserver(forName: .NSManagedObjectContextObjectsDidChange, object: container.viewContext, queue: .main) { notification in
+            print("viewContext has changed: \(notification)")
+        }
+
         let userID = service.createUser(name: "Foo")
         print("Total user: \((try? container.viewContext.count(for: User.fetchRequest())) ?? 0)")
 
@@ -101,8 +121,10 @@ struct PersistenceController {
         service.deleteUser(id: userID)
 
         let performCheck: (String) -> Void = { label in
+            print("[\(#function)] CHECK \(label): userInViewContext = \(userInViewContext)")
             print("[\(#function)] CHECK \(label): hasChanges? \(container.viewContext.hasChanges ? "✅" : "❌")")
             print("[\(#function)] CHECK \(label): isDeleted == true? \(userInViewContext.isDeleted ? "✅" : "❌")")
+            print("[\(#function)] CHECK \(label): isFault == true? \(userInViewContext.isFault ? "✅" : "❌")")
             print("[\(#function)] CHECK \(label): existingObject(with: userID) == nil? \((try? container.viewContext.existingObject(with: userID)) == nil ? "✅" : "❌")")
             print("[\(#function)] CHECK \(label): was the user really deleted? \((try? container.viewContext.fetch(theNewUser).count) == 0 ? "✅" : "❌")")
             print("")
@@ -179,5 +201,32 @@ struct PersistenceController {
             performCheck("the view context", container.viewContext)
             performCheck("a new background context", container.newBackgroundContext())
         }
+    }
+
+    func testConcurrency(_ service: UserService) {
+        let name = "Random"
+        let iterations = 50
+
+        let request = User.fetchRequest()
+        request.predicate = NSPredicate(format: "name = %@", name)
+
+        // Delete previously saved users
+        print("Deleting previously \(try! container.viewContext.count(for: request)) saved user")
+        try! container.viewContext.execute(NSBatchDeleteRequest(fetchRequest: NSFetchRequest(entityName: "User")))
+        try! container.viewContext.save()
+
+        let subjects = (1...iterations).map { _ in
+            service.createOrUpdate(name: name)
+        }
+        print("createOrUpdate is called \(iterations) times")
+
+        Publishers.MergeMany(subjects)
+            .collect()
+            .delay(for: .seconds(1), scheduler: DispatchQueue.main)
+            .sink {_ in
+                let count = try! container.viewContext.count(for: request)
+                print("'Random' users in the database: \(count)")
+            }
+            .store(in: &cancellables)
     }
 }
